@@ -10,6 +10,9 @@ Läuft komplett im Browser und fragt direkt die [Transitous](https://transitous.
 ## Umsteigezeit
 Im Feld „Umst.“ legst du fest, wie viele Minuten ein Umstieg mindestens dauern soll. Die Einstellung wird gemerkt.
 
+## Deutschlandticket
+„Nur Deutschlandticket“ (standardmäßig an) blendet Fernverkehr (ICE/IC/EC) und Fernbusse aus. Sonderfälle, in denen einzelne IC-Abschnitte mit dem Deutschlandticket erlaubt sind, werden nicht berücksichtigt.
+
 ## Hosting mit GitHub Pages
 Settings → Pages → Source: „Deploy from a branch“, Branch `main`, Ordner `/ (root)`.
 

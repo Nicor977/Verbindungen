@@ -51,6 +51,8 @@ button, input { font: inherit; color: inherit; }
   border-radius: 10px; background: var(--bg);
 }
 .sel { flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: inherit; color: inherit; }
+.row .check { width: auto; flex: 1; display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
 .iconbtn {
   flex: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); cursor: pointer; font-size: 18px; line-height: 1;
@@ -139,6 +141,10 @@ footer a { color: inherit; }
         <option value="20">mind. 20 min</option>
       </select>
     </div>
+    <div class="row">
+      <label></label>
+      <label class="check"><input type="checkbox" id="dticket"> Nur Deutschlandticket (kein ICE/IC/EC, kein Fernbus)</label>
+    </div>
     <div class="row" id="timerow" hidden>
       <label></label>
       <input type="datetime-local" id="when">
@@ -195,6 +201,8 @@ function dur(sec) {
   const m = Math.round(sec / 60);
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} h`;
 }
+// Verkehrsmittel, die mit dem Deutschlandticket fahren dürfen (ohne Fernverkehr und Fernbus)
+const DTICKET_MODES = "TRAM,SUBWAY,FERRY,METRO,BUS,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,FUNICULAR,AERIAL_LIFT,OTHER";
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const RAIL_NAME = /^(S|RB|RE|IC|ICE|EC|U)\d*/;
 
@@ -337,6 +345,7 @@ async function search(cursor) {
   const params = { fromPlace: state.from.id, toPlace: state.to.id, numItineraries: 5, language: "de" };
   const minT = $("mintransfer").value;
   if (minT) params.minTransferTime = minT;
+  if ($("dticket").checked) params.transitModes = DTICKET_MODES;
   if (cursor) params.pageCursor = cursor;
   else if (state.mode !== "now") {
     params.time = new Date($("when").value).toISOString();
@@ -417,6 +426,13 @@ function legHtml(l, i, legs) {
 $("mintransfer").value = load("minTransfer", "");
 $("mintransfer").addEventListener("change", () => {
   save("minTransfer", $("mintransfer").value);
+  if (state.from && state.to) search();
+});
+
+// ---------- Deutschlandticket-Filter (standardmäßig an, wird gemerkt) ----------
+$("dticket").checked = load("dticket", true);
+$("dticket").addEventListener("change", () => {
+  save("dticket", $("dticket").checked);
   if (state.from && state.to) search();
 });
 
