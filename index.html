@@ -59,8 +59,11 @@ button, input { font: inherit; color: inherit; }
   background: var(--card); border: 1px solid var(--line); border-radius: 10px;
   box-shadow: 0 6px 20px rgba(0,0,0,.15); max-height: 260px; overflow-y: auto;
 }
-.suggest div { padding: 10px; cursor: pointer; border-bottom: 1px solid var(--line); }
-.suggest div:last-child { border-bottom: 0; }
+.suggest .opt { display: flex; align-items: center; gap: 8px; padding: 10px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.suggest .opt span { flex: 1; min-width: 0; }
+.suggest .opt:last-child { border-bottom: 0; }
+.suggest .hdr { padding: 8px 10px 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.star { border: 0; background: none; font-size: 20px; color: #e0a800; cursor: pointer; padding: 0 4px; }
 .suggest small { color: var(--muted); display: block; }
 .timebar { display: flex; gap: 6px; flex-wrap: wrap; }
 .seg { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
@@ -129,7 +132,7 @@ footer a { color: inherit; }
     </div>
     <div class="actions">
       <button class="primary" id="search">Suchen</button>
-      <button class="secondary" id="savefav" title="Als Favorit speichern">☆ Merken</button>
+      <button class="secondary" id="savefav" title="Strecke als Favorit speichern">☆ Strecke merken</button>
     </div>
   </div>
 
@@ -221,41 +224,62 @@ $("savefav").addEventListener("click", () => {
   const short = (n) => n.replace(/\s*\(Main\)|\s*Bahnhof$|Hauptbahnhof/g, (m) => m.includes("Haupt") ? "Hbf" : "").trim();
   favs.push({ name: `${short(state.from.name)} → ${short(state.to.name)}`, from: state.from, to: state.to });
   save("favs", favs); state.activeFav = favs.length - 1; renderFavs();
-  $("status").textContent = "Als Favorit gespeichert.";
+  $("status").textContent = "Strecke gespeichert.";
 });
 
 // ---------- Eingabe mit Vorschlägen ----------
 function setPlace(which, place) { state[which] = place; $(which).value = place ? place.name : ""; }
+const HBF = { name: "Frankfurt (Main) Hauptbahnhof", id: "at-Railway-Current-Reference-Data-2026_de:06412:10:16:16" };
+const HAT = { name: "Hattersheim (Main) Bahnhof", id: "de-DELFI_de:06436:2001" };
+let stations = load("stations", [HAT, HBF]);
+const isFavStation = (id) => stations.some((x) => x.id === id);
+function toggleStation(st) {
+  if (isFavStation(st.id)) stations = stations.filter((x) => x.id !== st.id);
+  else stations.push({ name: st.name, id: st.id });
+  save("stations", stations);
+}
 function setupSuggest(which) {
   const input = $(which), box = $(which + "-s");
-  let timer, seq = 0;
+  let timer, seq = 0, list = [];
+  function show(items, header) {
+    list = items;
+    if (!items.length) { box.hidden = true; return; }
+    box.innerHTML = (header ? `<div class="hdr">${esc(header)}</div>` : "") + items.map((h, i) => {
+      const star = h.stop ? `<button class="star" data-star="${i}" aria-label="Station merken">${isFavStation(h.id) ? "★" : "☆"}</button>` : "";
+      return `<div class="opt" data-i="${i}"><span>${esc(h.name)}${h.stop ? "" : "<small>Adresse/Ort</small>"}</span>${star}</div>`;
+    }).join("");
+    box.hidden = false;
+  }
+  const showFavStations = () => show(stations.map((x) => ({ ...x, stop: true })), "Meine Stationen");
+  box.addEventListener("pointerdown", (e) => e.preventDefault()); // Feld behält den Fokus
+  box.addEventListener("click", (e) => {
+    const s = e.target.closest("[data-star]");
+    if (s) { toggleStation(list[+s.dataset.star]); show(list, box.querySelector(".hdr")?.textContent); return; }
+    const el = e.target.closest("[data-i]"); if (!el) return;
+    const h = list[+el.dataset.i];
+    setPlace(which, { name: h.name, id: h.id });
+    box.hidden = true; input.blur();
+    if (state.from && state.to) search();
+  });
+  input.addEventListener("focus", () => { input.select(); showFavStations(); });
   input.addEventListener("input", () => {
     state[which] = null; state.activeFav = null; renderFavs();
     clearTimeout(timer);
     const text = input.value.trim();
-    if (text.length < 2) { box.hidden = true; return; }
+    if (text.length < 2) { showFavStations(); return; }
     timer = setTimeout(async () => {
       const my = ++seq;
       try {
         const hits = await api("/v1/geocode", { text, language: "de" });
         if (my !== seq) return;
         const stops = hits.filter((h) => h.type === "STOP");
-        const list = (stops.length ? stops : hits).slice(0, 8);
-        box.innerHTML = list.map((h, i) =>
-          `<div data-i="${i}">${esc(h.name)}${h.type !== "STOP" ? "<small>Adresse/Ort</small>" : ""}</div>`).join("") ||
-          `<div>Nichts gefunden</div>`;
-        box.hidden = false;
-        box.onclick = (e) => {
-          const el = e.target.closest("[data-i]"); if (!el) return;
-          const h = list[+el.dataset.i];
-          setPlace(which, { name: h.name, id: h.type === "STOP" ? h.id : `${h.lat},${h.lon}` });
-          box.hidden = true;
-          if (state.from && state.to) search();
-        };
+        const items = (stops.length ? stops : hits).slice(0, 8).map((h) =>
+          ({ name: h.name, id: h.type === "STOP" ? h.id : `${h.lat},${h.lon}`, stop: h.type === "STOP" }));
+        items.length ? show(items) : (box.innerHTML = '<div class="hdr">Nichts gefunden</div>', box.hidden = false, list = []);
       } catch { box.hidden = true; }
     }, 250);
   });
-  input.addEventListener("blur", () => setTimeout(() => (box.hidden = true), 200));
+  input.addEventListener("blur", () => setTimeout(() => (box.hidden = true), 150));
 }
 setupSuggest("from"); setupSuggest("to");
 

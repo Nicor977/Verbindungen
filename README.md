@@ -3,6 +3,10 @@
 Kleine Web-App fürs Handy: ÖPNV-Verbindungen suchen, Favoriten-Strecken mit einem Tipp, Echtzeit und Hinweise auf Ersatzverkehr.
 Läuft komplett im Browser und fragt direkt die [Transitous](https://transitous.org)-API ab (kein Server, kein API-Schlüssel).
 
+## Favoriten
+- **Stationen:** Beim Tippen ins Von- oder Nach-Feld erscheinen „Meine Stationen“. Mit ☆ in der Vorschlagsliste merkst du eine Station, mit ★ entfernst du sie.
+- **Strecken:** Von und Nach wählen, dann „☆ Strecke merken“. Strecken stehen oben als Knöpfe; zweimal auf × tippen entfernt sie.
+
 ## Hosting mit GitHub Pages
 Settings → Pages → Source: „Deploy from a branch“, Branch `main`, Ordner `/ (root)`.
 
