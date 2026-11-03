@@ -50,6 +50,7 @@ button, input { font: inherit; color: inherit; }
   flex: 1; min-width: 0; padding: 10px; border: 1px solid var(--line);
   border-radius: 10px; background: var(--bg);
 }
+.sel { flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: inherit; color: inherit; }
 .iconbtn {
   flex: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); cursor: pointer; font-size: 18px; line-height: 1;
@@ -125,6 +126,18 @@ footer a { color: inherit; }
         <button class="seg" data-mode="dep">Ab</button>
         <button class="seg" data-mode="arr">An</button>
       </div>
+    </div>
+    <div class="row">
+      <label for="mintransfer">Umst.</label>
+      <select id="mintransfer" class="sel">
+        <option value="">mind. Standard</option>
+        <option value="3">mind. 3 min</option>
+        <option value="5">mind. 5 min</option>
+        <option value="8">mind. 8 min</option>
+        <option value="10">mind. 10 min</option>
+        <option value="15">mind. 15 min</option>
+        <option value="20">mind. 20 min</option>
+      </select>
     </div>
     <div class="row" id="timerow" hidden>
       <label></label>
@@ -322,6 +335,8 @@ async function search(cursor) {
   if (!state.from || !state.to) { $("status").textContent = "Bitte Start und Ziel aus der Liste wählen."; return; }
   clearTimeout(state.refreshTimer);
   const params = { fromPlace: state.from.id, toPlace: state.to.id, numItineraries: 5, language: "de" };
+  const minT = $("mintransfer").value;
+  if (minT) params.minTransferTime = minT;
   if (cursor) params.pageCursor = cursor;
   else if (state.mode !== "now") {
     params.time = new Date($("when").value).toISOString();
@@ -377,8 +392,15 @@ function tripHtml(it) {
   <div class="legs">${it.legs.map(legHtml).join("")}</div></details>`;
 }
 
-function legHtml(l) {
-  if (l.mode === "WALK") return `<div class="leg walk">🚶 ${Math.max(1, Math.round(l.duration / 60))} min Fußweg zu ${esc(l.to.name)}</div>`;
+function legHtml(l, i, legs) {
+  if (l.mode === "WALK") {
+    const min = Math.max(1, Math.round(l.duration / 60));
+    const m = l.distance ? ` (${Math.round(l.distance)} m Fußweg)` : "";
+    const between = i > 0 && i < legs.length - 1;
+    return between
+      ? `<div class="leg walk">⇄ Umstieg ${min} min${m}</div>`
+      : `<div class="leg walk">🚶 ${min} min Fußweg zu ${esc(l.to.name)}</div>`;
+  }
   const bg = l.routeColor ? `#${l.routeColor}` : "var(--muted)";
   const fg = l.routeTextColor ? `#${l.routeTextColor}` : "#fff";
   const trk = (p) => (p.track || p.scheduledTrack) ? ` · ${esc(p.track || p.scheduledTrack)}` : "";
@@ -390,6 +412,13 @@ function legHtml(l) {
       <span class="t">${hm(l.endTime)}${delayHtml(l.endTime, l.scheduledEndTime, l.realTime)}</span><span>${esc(l.to.name)}${trk(l.to)}</span>
     </div></div>`;
 }
+
+// ---------- Mindest-Umsteigezeit (wird gemerkt) ----------
+$("mintransfer").value = load("minTransfer", "");
+$("mintransfer").addEventListener("change", () => {
+  save("minTransfer", $("mintransfer").value);
+  if (state.from && state.to) search();
+});
 
 // ---------- Start ----------
 document.addEventListener("visibilitychange", () => {

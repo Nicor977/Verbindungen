@@ -7,6 +7,9 @@ Läuft komplett im Browser und fragt direkt die [Transitous](https://transitous.
 - **Stationen:** Beim Tippen ins Von- oder Nach-Feld erscheinen „Meine Stationen“. Mit ☆ in der Vorschlagsliste merkst du eine Station, mit ★ entfernst du sie.
 - **Strecken:** Von und Nach wählen, dann „☆ Strecke merken“. Strecken stehen oben als Knöpfe; zweimal auf × tippen entfernt sie.
 
+## Umsteigezeit
+Im Feld „Umst.“ legst du fest, wie viele Minuten ein Umstieg mindestens dauern soll. Die Einstellung wird gemerkt.
+
 ## Hosting mit GitHub Pages
 Settings → Pages → Source: „Deploy from a branch“, Branch `main`, Ordner `/ (root)`.
 
