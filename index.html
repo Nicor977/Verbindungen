@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Verbindungen</title>
+<meta name="description" content="ÖPNV-Verbindungen im Rhein-Main-Gebiet, Daten von Transitous">
+<meta name="theme-color" content="#0b6e4f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Verbindungen">
+<style>
+:root {
+  --bg: #f4f5f2; --card: #ffffff; --text: #1b1f1d; --muted: #5f6763;
+  --line: #dfe3e0; --accent: #0b6e4f; --accent-text: #ffffff;
+  --late: #c0392b; --ok: #1e8449; --warn-bg: #fff4d6; --warn-text: #7a5300;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111413; --card: #1b201e; --text: #e8ece9; --muted: #9aa39f;
+    --line: #2c3330; --accent: #3fb68b; --accent-text: #08130e;
+    --late: #ff7a6b; --ok: #6fd39a; --warn-bg: #3a3014; --warn-text: #ffd98a;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { margin: 0; }
+body {
+  background: var(--bg); color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+}
+main { max-width: 560px; margin: 0 auto; padding: 12px 16px 40px; }
+h1 { font-size: 20px; margin: 8px 0 12px; }
+button, input { font: inherit; color: inherit; }
+.favs { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; margin-bottom: 12px; }
+.fav {
+  flex: none; border: 1px solid var(--line); background: var(--card);
+  border-radius: 999px; padding: 8px 14px; cursor: pointer; white-space: nowrap;
+}
+.fav.active { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.fav .x { margin-left: 8px; opacity: .6; }
+.form { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.row { position: relative; display: flex; align-items: center; gap: 8px; }
+.row + .row { margin-top: 8px; }
+.row label { width: 42px; color: var(--muted); font-size: 14px; flex: none; }
+.row input[type=text], .row input[type=datetime-local] {
+  flex: 1; min-width: 0; padding: 10px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--bg);
+}
+.iconbtn {
+  flex: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line);
+  background: var(--bg); cursor: pointer; font-size: 18px; line-height: 1;
+}
+.suggest {
+  position: absolute; left: 50px; right: 48px; top: 44px; z-index: 5;
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.15); max-height: 260px; overflow-y: auto;
+}
+.suggest div { padding: 10px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.suggest div:last-child { border-bottom: 0; }
+.suggest small { color: var(--muted); display: block; }
+.timebar { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg { border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 14px; }
+.seg.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+.actions { display: flex; gap: 8px; margin-top: 12px; }
+.primary {
+  flex: 1; padding: 12px; border: 0; border-radius: 10px; background: var(--accent);
+  color: var(--accent-text); font-weight: 600; cursor: pointer;
+}
+.secondary { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; }
+.status { color: var(--muted); font-size: 14px; margin: 14px 2px 6px; min-height: 20px; }
+.trip { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-top: 10px; overflow: hidden; }
+.trip.cancelled { opacity: .55; }
+.trip summary { list-style: none; padding: 12px; cursor: pointer; }
+.trip summary::-webkit-details-marker { display: none; }
+.top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.times { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.delay { font-size: 13px; font-weight: 600; margin-left: 4px; }
+.late { color: var(--late); } .ontime { color: var(--ok); }
+.meta { color: var(--muted); font-size: 14px; text-align: right; white-space: nowrap; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 8px; }
+.chip { border-radius: 6px; padding: 2px 7px; font-size: 13px; font-weight: 650; }
+.walk { color: var(--muted); font-size: 13px; }
+.sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+.warn { background: var(--warn-bg); color: var(--warn-text); border-radius: 8px; padding: 6px 8px; font-size: 13px; margin-top: 8px; }
+.legs { border-top: 1px solid var(--line); padding: 8px 12px 12px; }
+.leg { padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 14px; }
+.leg:last-child { border-bottom: 0; }
+.leg .l1 { display: flex; gap: 8px; align-items: center; }
+.leg .st { display: grid; grid-template-columns: 82px 1fr; gap: 2px 8px; margin-top: 6px; }
+.leg .t { font-variant-numeric: tabular-nums; font-weight: 600; }
+.more { width: 100%; margin-top: 12px; }
+footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: center; }
+footer a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Verbindungen</h1>
+  <div class="favs" id="favs"></div>
+
+  <div class="form">
+    <div class="row">
+      <label for="from">Von</label>
+      <input type="text" id="from" autocomplete="off" placeholder="Haltestelle">
+      <button class="iconbtn" id="locate" title="Mein Standort" aria-label="Mein Standort">◎</button>
+      <div class="suggest" id="from-s" hidden></div>
+    </div>
+    <div class="row">
+      <label for="to">Nach</label>
+      <input type="text" id="to" autocomplete="off" placeholder="Haltestelle">
+      <button class="iconbtn" id="swap" title="Tauschen" aria-label="Tauschen">⇅</button>
+      <div class="suggest" id="to-s" hidden></div>
+    </div>
+    <div class="row">
+      <label>Zeit</label>
+      <div class="timebar">
+        <button class="seg on" data-mode="now">Jetzt</button>
+        <button class="seg" data-mode="dep">Ab</button>
+        <button class="seg" data-mode="arr">An</button>
+      </div>
+    </div>
+    <div class="row" id="timerow" hidden>
+      <label></label>
+      <input type="datetime-local" id="when">
+    </div>
+    <div class="actions">
+      <button class="primary" id="search">Suchen</button>
+      <button class="secondary" id="savefav" title="Als Favorit speichern">☆ Merken</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div id="results"></div>
+  <button class="secondary more" id="later" hidden>Spätere Verbindungen</button>
+
+  <footer>
+    Fahrplan- und Echtzeitdaten: <a href="https://transitous.org" target="_blank" rel="noopener">Transitous</a>
+    (<a href="https://transitous.org/sources/" target="_blank" rel="noopener">Quellen</a>).
+    Ohne Gewähr, bitte bei Störungen auch die RMV-App prüfen.
+  </footer>
+</main>
+
+<script>
+const API = "https://api.transitous.org/api";
+const TZ = "Europe/Berlin";
+const DEFAULT_FAVS = [
+  { name: "Hattersheim → Hbf",
+    from: { name: "Hattersheim (Main) Bahnhof", id: "de-DELFI_de:06436:2001" },
+    to:   { name: "Frankfurt (Main) Hauptbahnhof", id: "at-Railway-Current-Reference-Data-2026_de:06412:10:16:16" } },
+  { name: "Hbf → Hattersheim",
+    from: { name: "Frankfurt (Main) Hauptbahnhof", id: "at-Railway-Current-Reference-Data-2026_de:06412:10:16:16" },
+    to:   { name: "Hattersheim (Main) Bahnhof", id: "de-DELFI_de:06436:2001" } },
+];
+
+const $ = (id) => document.getElementById(id);
+const state = { from: null, to: null, mode: "now", nextCursor: null, activeFav: null, refreshTimer: null };
+
+// ---------- Speicher (localStorage, mit Fallback) ----------
+function load(key, fallback) {
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+function save(key, value) { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} }
+let favs = load("favs", DEFAULT_FAVS);
+
+// ---------- Hilfsfunktionen ----------
+const hm = (iso) => new Date(iso).toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit", timeZone: TZ });
+const minutes = (a, b) => Math.round((new Date(a) - new Date(b)) / 60000);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function delayHtml(actual, scheduled, realTime) {
+  if (!realTime || !scheduled) return "";
+  const d = minutes(actual, scheduled);
+  return d > 0 ? `<span class="delay late">+${d}</span>` : `<span class="delay ontime">±0</span>`;
+}
+function dur(sec) {
+  const m = Math.round(sec / 60);
+  return m < 60 ? `${m} min` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} h`;
+}
+const BUS_MODES = new Set(["BUS", "COACH"]);
+const RAIL_NAME = /^(S|RB|RE|IC|ICE|EC|U)\d*/;
+
+async function api(path, params) {
+  const url = `${API}${path}?${new URLSearchParams(params)}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Server antwortet mit ${res.status}`);
+  return res.json();
+}
+
+// ---------- Favoriten ----------
+function renderFavs() {
+  $("favs").innerHTML = favs.map((f, i) =>
+    `<button class="fav${state.activeFav === i ? " active" : ""}" data-i="${i}">${esc(f.name)}<span class="x" data-del="${i}" title="Entfernen">×</span></button>`
+  ).join("");
+}
+$("favs").addEventListener("click", (e) => {
+  const del = e.target.dataset.del;
+  if (del !== undefined) {
+    e.stopPropagation();
+    if (confirmDelete(favs[del].name)) { favs.splice(+del, 1); save("favs", favs); state.activeFav = null; renderFavs(); }
+    return;
+  }
+  const btn = e.target.closest(".fav"); if (!btn) return;
+  const f = favs[+btn.dataset.i];
+  state.activeFav = +btn.dataset.i;
+  setPlace("from", f.from); setPlace("to", f.to);
+  setMode("now"); renderFavs(); search();
+});
+function confirmDelete(name) {
+  // Zweimal tippen statt Bestätigungsdialog
+  const now = Date.now();
+  if (confirmDelete.last && confirmDelete.last.name === name && now - confirmDelete.last.t < 2500) return true;
+  confirmDelete.last = { name, t: now };
+  $("status").textContent = `Nochmal auf × tippen, um „${name}“ zu entfernen.`;
+  return false;
+}
+$("savefav").addEventListener("click", () => {
+  if (!state.from || !state.to) { $("status").textContent = "Erst Start und Ziel auswählen."; return; }
+  const short = (n) => n.replace(/\s*\(Main\)|\s*Bahnhof$|Hauptbahnhof/g, (m) => m.includes("Haupt") ? "Hbf" : "").trim();
+  favs.push({ name: `${short(state.from.name)} → ${short(state.to.name)}`, from: state.from, to: state.to });
+  save("favs", favs); state.activeFav = favs.length - 1; renderFavs();
+  $("status").textContent = "Als Favorit gespeichert.";
+});
+
+// ---------- Eingabe mit Vorschlägen ----------
+function setPlace(which, place) { state[which] = place; $(which).value = place ? place.name : ""; }
+function setupSuggest(which) {
+  const input = $(which), box = $(which + "-s");
+  let timer, seq = 0;
+  input.addEventListener("input", () => {
+    state[which] = null; state.activeFav = null; renderFavs();
+    clearTimeout(timer);
+    const text = input.value.trim();
+    if (text.length < 2) { box.hidden = true; return; }
+    timer = setTimeout(async () => {
+      const my = ++seq;
+      try {
+        const hits = await api("/v1/geocode", { text, language: "de" });
+        if (my !== seq) return;
+        const stops = hits.filter((h) => h.type === "STOP");
+        const list = (stops.length ? stops : hits).slice(0, 8);
+        box.innerHTML = list.map((h, i) =>
+          `<div data-i="${i}">${esc(h.name)}${h.type !== "STOP" ? "<small>Adresse/Ort</small>" : ""}</div>`).join("") ||
+          `<div>Nichts gefunden</div>`;
+        box.hidden = false;
+        box.onclick = (e) => {
+          const el = e.target.closest("[data-i]"); if (!el) return;
+          const h = list[+el.dataset.i];
+          setPlace(which, { name: h.name, id: h.type === "STOP" ? h.id : `${h.lat},${h.lon}` });
+          box.hidden = true;
+          if (state.from && state.to) search();
+        };
+      } catch { box.hidden = true; }
+    }, 250);
+  });
+  input.addEventListener("blur", () => setTimeout(() => (box.hidden = true), 200));
+}
+setupSuggest("from"); setupSuggest("to");
+
+$("swap").addEventListener("click", () => {
+  const f = state.from, t = state.to;
+  setPlace("from", t); setPlace("to", f);
+  state.activeFav = favs.findIndex((x) => x.from.id === t?.id && x.to.id === f?.id);
+  if (state.activeFav < 0) state.activeFav = null;
+  renderFavs();
+  if (state.from && state.to) search();
+});
+
+$("locate").addEventListener("click", () => {
+  if (!navigator.geolocation) { $("status").textContent = "Standort wird nicht unterstützt."; return; }
+  $("status").textContent = "Standort wird ermittelt …";
+  navigator.geolocation.getCurrentPosition(
+    (p) => { setPlace("from", { name: "Mein Standort", id: `${p.coords.latitude},${p.coords.longitude}` });
+             $("status").textContent = ""; if (state.to) search(); },
+    () => { $("status").textContent = "Standort nicht verfügbar."; },
+    { enableHighAccuracy: true, timeout: 10000 });
+});
+
+// ---------- Zeit ----------
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll(".seg").forEach((b) => b.classList.toggle("on", b.dataset.mode === mode));
+  $("timerow").hidden = mode === "now";
+  if (mode !== "now" && !$("when").value) {
+    const d = new Date(Date.now() - new Date().getTimezoneOffset() * 60000);
+    $("when").value = d.toISOString().slice(0, 16);
+  }
+}
+document.querySelectorAll(".seg").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+// ---------- Suche ----------
+$("search").addEventListener("click", () => search());
+$("later").addEventListener("click", () => search(state.nextCursor));
+
+async function search(cursor) {
+  if (!state.from || !state.to) { $("status").textContent = "Bitte Start und Ziel aus der Liste wählen."; return; }
+  clearTimeout(state.refreshTimer);
+  const params = { fromPlace: state.from.id, toPlace: state.to.id, numItineraries: 5, language: "de" };
+  if (cursor) params.pageCursor = cursor;
+  else if (state.mode !== "now") {
+    params.time = new Date($("when").value).toISOString();
+    if (state.mode === "arr") params.arriveBy = "true";
+  }
+  $("status").textContent = "Suche läuft …";
+  if (!cursor) { $("results").innerHTML = ""; $("later").hidden = true; }
+  try {
+    const plan = await api("/v5/plan", params);
+    const its = plan.itineraries || [];
+    state.nextCursor = plan.nextPageCursor || null;
+    $("results").insertAdjacentHTML("beforeend", its.map(tripHtml).join(""));
+    $("later").hidden = !state.nextCursor || !its.length;
+    const stand = hm(new Date().toISOString());
+    $("status").textContent = its.length || cursor
+      ? `${state.from.name} → ${state.to.name} · Stand ${stand}`
+      : "Keine Verbindungen gefunden.";
+    if (state.mode === "now" && !cursor) state.refreshTimer = setTimeout(() => search(), 60000);
+  } catch (err) {
+    $("status").textContent = `Fehler: ${err.message}. Internetverbindung prüfen und nochmal versuchen.`;
+  }
+}
+
+function tripHtml(it) {
+  const rides = it.legs.filter((l) => l.mode !== "WALK");
+  const first = rides[0] || it.legs[0], last = rides[rides.length - 1] || it.legs[it.legs.length - 1];
+  const cancelled = it.legs.some((l) => l.cancelled);
+  const chips = it.legs.map((l) => {
+    if (l.mode === "WALK") return Math.round(l.duration / 60) >= 2 ? `<span class="walk">🚶${Math.round(l.duration / 60)}</span>` : "";
+    const bg = l.routeColor ? `#${l.routeColor}` : "var(--muted)";
+    const fg = l.routeTextColor ? `#${l.routeTextColor}` : "#fff";
+    return `<span class="chip" style="background:${esc(bg)};color:${esc(fg)}">${esc(l.displayName || l.routeShortName || l.mode)}</span>`;
+  }).filter(Boolean).join('<span class="walk">›</span>');
+
+  const warnings = [];
+  if (cancelled) warnings.push("Teil der Verbindung fällt aus.");
+  if (rides.some((l) => BUS_MODES.has(l.mode) && RAIL_NAME.test(l.routeShortName || "")))
+    warnings.push("Bus statt Bahn (Ersatzverkehr).");
+  const alerts = [...new Set(it.legs.flatMap((l) => (l.alerts || []).map((a) => a.headerText || a.descriptionText)).filter(Boolean))];
+  alerts.slice(0, 2).forEach((a) => warnings.push(a));
+
+  const depTrack = first.from?.track || first.from?.scheduledTrack;
+  return `<details class="trip${cancelled ? " cancelled" : ""}"><summary>
+    <div class="top">
+      <div class="times">${hm(first.startTime)}${delayHtml(first.startTime, first.scheduledStartTime, first.realTime)}
+        – ${hm(last.endTime)}${delayHtml(last.endTime, last.scheduledEndTime, last.realTime)}</div>
+      <div class="meta">${dur(it.duration)}<br>${it.transfers ? `${it.transfers} Umstieg${it.transfers > 1 ? "e" : ""}` : "direkt"}</div>
+    </div>
+    <div class="chips">${chips}</div>
+    <div class="sub">ab ${esc(first.from.name)}${depTrack ? `, ${esc(depTrack)}` : ""}</div>
+    ${warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
+  </summary>
+  <div class="legs">${it.legs.map(legHtml).join("")}</div></details>`;
+}
+
+function legHtml(l) {
+  if (l.mode === "WALK") return `<div class="leg walk">🚶 ${Math.max(1, Math.round(l.duration / 60))} min Fußweg zu ${esc(l.to.name)}</div>`;
+  const bg = l.routeColor ? `#${l.routeColor}` : "var(--muted)";
+  const fg = l.routeTextColor ? `#${l.routeTextColor}` : "#fff";
+  const trk = (p) => (p.track || p.scheduledTrack) ? ` · ${esc(p.track || p.scheduledTrack)}` : "";
+  return `<div class="leg">
+    <div class="l1"><span class="chip" style="background:${esc(bg)};color:${esc(fg)}">${esc(l.displayName || l.routeShortName || l.mode)}</span>
+      <span>Richtung ${esc(l.headsign || l.tripTo?.name || "")}</span>${l.cancelled ? ' <b class="late">fällt aus</b>' : ""}</div>
+    <div class="st">
+      <span class="t">${hm(l.startTime)}${delayHtml(l.startTime, l.scheduledStartTime, l.realTime)}</span><span>${esc(l.from.name)}${trk(l.from)}</span>
+      <span class="t">${hm(l.endTime)}${delayHtml(l.endTime, l.scheduledEndTime, l.realTime)}</span><span>${esc(l.to.name)}${trk(l.to)}</span>
+    </div></div>`;
+}
+
+// ---------- Start ----------
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && state.mode === "now" && state.from && state.to) search();
+});
+renderFavs();
+if (favs.length) { state.activeFav = 0; setPlace("from", favs[0].from); setPlace("to", favs[0].to); renderFavs(); search(); }
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+</body>
+</html>
