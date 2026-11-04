@@ -98,6 +98,8 @@ button, input { font: inherit; color: inherit; }
 .leg .l1 { display: flex; gap: 8px; align-items: center; }
 .leg .st { display: grid; grid-template-columns: 82px 1fr; gap: 2px 8px; margin-top: 6px; }
 .leg .t { font-variant-numeric: tabular-nums; font-weight: 600; }
+.trk { display: inline-block; margin-left: 6px; padding: 0 6px; border: 1px solid var(--line); border-radius: 6px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+.trk.changed { border-color: var(--late); color: var(--late); }
 .more { width: 100%; margin-top: 12px; }
 footer { color: var(--muted); font-size: 12px; margin-top: 24px; text-align: center; }
 footer a { color: inherit; }
@@ -205,6 +207,20 @@ function dur(sec) {
 const DTICKET_MODES = "TRAM,SUBWAY,FERRY,METRO,BUS,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,FUNICULAR,AERIAL_LIFT,OTHER";
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const RAIL_NAME = /^(S|RB|RE|IC|ICE|EC|U)\d*/;
+
+// Gleis/Steig als kleines Schild. Bei Gleiswechsel rot mit altem Gleis.
+function trackLabel(t, mode) {
+  if (/^\d+[a-z]?$/i.test(t)) return `${BUS_MODES.has(mode) ? "Steig" : "Gl."} ${t}`;
+  if (/^[A-Z]$/.test(t)) return `Steig ${t}`;
+  return t;
+}
+function trackHtml(p, mode) {
+  const t = p?.track || p?.scheduledTrack;
+  if (!t) return "";
+  const changed = p.track && p.scheduledTrack && p.track !== p.scheduledTrack;
+  const title = changed ? ` title="Gleiswechsel, geplant: ${esc(p.scheduledTrack)}"` : "";
+  return `<span class="trk${changed ? " changed" : ""}"${title}>${esc(trackLabel(t, mode))}${changed ? ` statt ${esc(p.scheduledTrack)}` : ""}</span>`;
+}
 
 async function api(path, params) {
   const url = `${API}${path}?${new URLSearchParams(params)}`;
@@ -387,7 +403,6 @@ function tripHtml(it) {
   const alerts = [...new Set(it.legs.flatMap((l) => (l.alerts || []).map((a) => a.headerText || a.descriptionText)).filter(Boolean))];
   alerts.slice(0, 2).forEach((a) => warnings.push(a));
 
-  const depTrack = first.from?.track || first.from?.scheduledTrack;
   return `<details class="trip${cancelled ? " cancelled" : ""}"><summary>
     <div class="top">
       <div class="times">${hm(first.startTime)}${delayHtml(first.startTime, first.scheduledStartTime, first.realTime)}
@@ -395,7 +410,7 @@ function tripHtml(it) {
       <div class="meta">${dur(it.duration)}<br>${it.transfers ? `${it.transfers} Umstieg${it.transfers > 1 ? "e" : ""}` : "direkt"}</div>
     </div>
     <div class="chips">${chips}</div>
-    <div class="sub">ab ${esc(first.from.name)}${depTrack ? `, ${esc(depTrack)}` : ""}</div>
+    <div class="sub">ab ${esc(first.from.name)}${trackHtml(first.from, first.mode)}</div>
     ${warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
   </summary>
   <div class="legs">${it.legs.map(legHtml).join("")}</div></details>`;
@@ -412,13 +427,12 @@ function legHtml(l, i, legs) {
   }
   const bg = l.routeColor ? `#${l.routeColor}` : "var(--muted)";
   const fg = l.routeTextColor ? `#${l.routeTextColor}` : "#fff";
-  const trk = (p) => (p.track || p.scheduledTrack) ? ` · ${esc(p.track || p.scheduledTrack)}` : "";
   return `<div class="leg">
     <div class="l1"><span class="chip" style="background:${esc(bg)};color:${esc(fg)}">${esc(l.displayName || l.routeShortName || l.mode)}</span>
       <span>Richtung ${esc(l.headsign || l.tripTo?.name || "")}</span>${l.cancelled ? ' <b class="late">fällt aus</b>' : ""}</div>
     <div class="st">
-      <span class="t">${hm(l.startTime)}${delayHtml(l.startTime, l.scheduledStartTime, l.realTime)}</span><span>${esc(l.from.name)}${trk(l.from)}</span>
-      <span class="t">${hm(l.endTime)}${delayHtml(l.endTime, l.scheduledEndTime, l.realTime)}</span><span>${esc(l.to.name)}${trk(l.to)}</span>
+      <span class="t">${hm(l.startTime)}${delayHtml(l.startTime, l.scheduledStartTime, l.realTime)}</span><span>${esc(l.from.name)}${trackHtml(l.from, l.mode)}</span>
+      <span class="t">${hm(l.endTime)}${delayHtml(l.endTime, l.scheduledEndTime, l.realTime)}</span><span>${esc(l.to.name)}${trackHtml(l.to, l.mode)}</span>
     </div></div>`;
 }
 
@@ -442,7 +456,7 @@ document.addEventListener("visibilitychange", () => {
 });
 renderFavs();
 if (favs.length) { state.activeFav = 0; setPlace("from", favs[0].from); setPlace("to", favs[0].to); renderFavs(); search(); }
-if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js").catch(() => {});
+if ("serviceWorker" in navigator && location.protocol === "https:") navigator.serviceWorker.register("sw.js", { updateViaCache: "none" }).catch(() => {});
 </script>
 </body>
 </html>
