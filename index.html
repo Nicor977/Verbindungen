@@ -54,7 +54,9 @@ button, input { font: inherit; color: inherit; }
 .row .check { width: auto; flex: 1; display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
 .meldungen { background: var(--warn-bg); color: var(--warn-text); border-radius: 12px; padding: 8px 12px; margin-top: 4px; font-size: 14px; }
-.meldungen .mh { font-weight: 650; margin-bottom: 4px; }
+.meldungen .mh { font-weight: 650; cursor: pointer; list-style: none; }
+.meldungen .mh::-webkit-details-marker { display: none; }
+#mbox[open] .mh { margin-bottom: 4px; }
 .meldungen .msg summary { cursor: pointer; padding: 4px 0; }
 .meldungen .mt { white-space: pre-line; padding: 4px 0 8px; color: var(--text); }
 .iconbtn {
@@ -98,7 +100,18 @@ button, input { font: inherit; color: inherit; }
 .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .trip.cancelled { opacity: .55; }
-.trip summary { list-style: none; padding: 12px; cursor: pointer; }
+.trip summary { list-style: none; padding: 10px 12px; cursor: pointer; }
+.trip { margin-top: 6px; border-radius: 10px; }
+.crow { display: flex; align-items: center; gap: 8px; }
+.crow .ct { font-size: 16px; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.crow .ct .delay { font-size: 12px; }
+.crow .cl { flex: 1; display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+.crow .cm { color: var(--muted); font-size: 13px; white-space: nowrap; min-width: 52px; text-align: right; }
+.wicon { color: #e6a100; margin-right: 4px; font-size: 14px; }
+.detail { padding: 0 12px 4px; }
+.detail .chips { margin-top: 0; }
+.trip:not([open]) .detail, .trip:not([open]) .legs { display: none; }
+.trip[open] summary { border-bottom: 0; }
 .trip summary::-webkit-details-marker { display: none; }
 .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
 .times { font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -201,7 +214,7 @@ const DEFAULT_FAVS = [
 ];
 
 const $ = (id) => document.getElementById(id);
-const state = { from: null, to: null, mode: "now", nextCursor: null, activeFav: null, refreshTimer: null };
+const state = { from: null, to: null, mode: "now", nextCursor: null, activeFav: null, refreshTimer: null, openTrips: new Set(), msgsOpen: false };
 
 // ---------- Speicher (localStorage, mit Fallback) ----------
 function load(key, fallback) {
@@ -312,8 +325,8 @@ function renderMeldungen() {
   const box = $("meldungen");
   const msgs = state.rmv ? [...state.rmv.all.values()] : [];
   box.hidden = !msgs.length;
-  box.innerHTML = msgs.length ? `<div class="mh">RMV-Meldungen für diese Strecke</div>` + msgs.map((m) =>
-    `<details class="msg"><summary>${esc(m.head)}</summary><div class="mt">${esc(htmlToText(m.text || m.lead))}</div></details>`).join("") : "";
+  box.innerHTML = msgs.length ? `<details id="mbox"${state.msgsOpen ? " open" : ""}><summary class="mh">⚠ ${msgs.length} RMV-Meldung${msgs.length > 1 ? "en" : ""} für diese Strecke</summary>` + msgs.map((m) =>
+    `<details class="msg"><summary>${esc(m.head)}</summary><div class="mt">${esc(htmlToText(m.text || m.lead))}</div></details>`).join("") + `</details>` : "";
 }
 
 const DTICKET_MODES = "TRAM,SUBWAY,FERRY,METRO,BUS,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,FUNICULAR,AERIAL_LIFT,OTHER";
@@ -558,18 +571,28 @@ function tripHtml(it, isPast) {
   const alerts = [...new Set(it.legs.flatMap((l) => (l.alerts || []).map((a) => a.headerText || a.descriptionText)).filter(Boolean))];
   alerts.slice(0, 2).forEach((a) => warnings.push(a));
 
-  return `<details class="trip ${delayClass(it)}${isPast ? " past" : ""}${cancelled ? " cancelled" : ""}"><summary>
-    <div class="top">
-      <div class="times">${hm(first.startTime)}${delayHtml(first.startTime, first.scheduledStartTime, first.realTime)}
-        – ${hm(last.endTime)}${delayHtml(last.endTime, last.scheduledEndTime, last.realTime)}</div>
-      <div class="meta">${dur(it.duration)}<br>${it.transfers ? `${it.transfers} Umstieg${it.transfers > 1 ? "e" : ""}` : "direkt"}</div>
+  const lines = rides.map((l) => {
+    const bg = l.routeColor ? `#${l.routeColor}` : "var(--muted)";
+    const fg = l.routeTextColor ? `#${l.routeTextColor}` : "#fff";
+    return `<span class="chip sm" style="background:${esc(bg)};color:${esc(fg)}">${esc(l.displayName || l.routeShortName || l.mode)}</span>`;
+  }).join("");
+  const key = tripKey(it);
+  return `<details class="trip ${delayClass(it)}${isPast ? " past" : ""}${cancelled ? " cancelled" : ""}" data-key="${esc(key)}"${state.openTrips.has(key) ? " open" : ""}><summary>
+    <div class="crow">
+      <span class="ct">${hm(first.startTime)}${delayHtml(first.startTime, first.scheduledStartTime, first.realTime)}
+        → ${hm(last.endTime)}${delayHtml(last.endTime, last.scheduledEndTime, last.realTime)}</span>
+      <span class="cl">${lines}</span>
+      <span class="cm">${warnings.length ? '<span class="wicon" title="Meldung">⚠</span>' : ""}${dur(it.duration)}</span>
     </div>
-    <div class="chips">${chips}</div>
-    <div class="sub">ab ${esc(first.from.name)}${trackHtml(first.from, first.mode)}</div>
-    ${warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
   </summary>
+  <div class="detail">
+    <div class="chips">${chips}</div>
+    <div class="sub">ab ${esc(first.from.name)}${trackHtml(first.from, first.mode)} · ${it.transfers ? `${it.transfers} Umstieg${it.transfers > 1 ? "e" : ""}` : "direkt"}</div>
+    ${warnings.map((w) => `<div class="warn">${esc(w)}</div>`).join("")}
+  </div>
   <div class="legs">${it.legs.map(legHtml).join("")}</div></details>`;
 }
+function tripKey(it) { const f = firstRide(it); return `${f.routeShortName || f.displayName}|${f.scheduledStartTime || f.startTime}`; }
 
 function legHtml(l, i, legs) {
   if (l.mode === "WALK") {
@@ -604,6 +627,13 @@ $("dticket").addEventListener("change", () => {
   save("dticket", $("dticket").checked);
   if (state.from && state.to) search();
 });
+
+// Aufgeklappte Verbindungen bleiben bei der minütlichen Aktualisierung offen
+$("results").addEventListener("toggle", (e) => {
+  const d = e.target; if (!d.dataset || !d.dataset.key) return;
+  d.open ? state.openTrips.add(d.dataset.key) : state.openTrips.delete(d.dataset.key);
+}, true);
+$("meldungen").addEventListener("toggle", (e) => { if (e.target.id === "mbox") state.msgsOpen = e.target.open; }, true);
 
 // ---------- Start ----------
 document.addEventListener("visibilitychange", () => {
