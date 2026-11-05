@@ -1,4 +1,4 @@
-name: RMV-Echtzeit prüfen
+name: Live-Seite prüfen
 on:
   push:
     branches: [rmv-probe]
@@ -7,6 +7,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: |
-          W=https://rmv-proxy.nico-regente-projekte.workers.dev; O="Origin: https://nicor977.github.io"
-          echo "===== RMV Abfahrten Bahnhof Süd"
-          curl -sS -H "$O" "$W/departureBoard?id=3022587&duration=90&maxJourneys=20" | jq -r '.Departure[]? | [.name, .direction, .time, (.rtTime // "-"), (.JourneyStatus // "")] | @tsv'
+          sleep 75
+          npm i --silent playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null 2>&1
+          cat > t.js <<'JS'
+          const { chromium } = require('playwright');
+          (async () => {
+            const b = await chromium.launch(); const c = await b.newContext({ timezoneId: 'Europe/Berlin' }); const p = await c.newPage();
+            p.on('pageerror', e => console.log('pageerror:', e.message));
+            await p.goto('https://nicor977.github.io/Verbindungen/?v=' + Date.now());
+            await p.waitForSelector('#results .trip', { timeout: 60000 }); await p.waitForTimeout(3000);
+            console.log('Hat past-Bereich:', !!(await p.$('#past')));
+            const f = (sel) => p.$$eval(sel, d => d.map(x => x.className + ' | ' + x.querySelector('.times').textContent.replace(/\s+/g, ' ') + ' | ' + x.querySelector('.chips').textContent));
+            console.log('Vergangen:', JSON.stringify(await f('#past .trip'), null, 1));
+            console.log('Aktuell:', JSON.stringify(await f('#results .trip'), null, 1));
+            await b.close();
+          })();
+          JS
+          node t.js
