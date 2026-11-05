@@ -1,0 +1,12 @@
+name: RMV-Echtzeit prüfen
+on:
+  push:
+    branches: [rmv-probe]
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          W=https://rmv-proxy.nico-regente-projekte.workers.dev; O="Origin: https://nicor977.github.io"
+          echo "===== RMV Abfahrten Bahnhof Süd"
+          curl -sS -H "$O" "$W/departureBoard?id=3022587&duration=90&maxJourneys=20" | jq -r '.Departure[]? | [.name, .direction, .time, (.rtTime // "-"), (.JourneyStatus // "")] | @tsv'
