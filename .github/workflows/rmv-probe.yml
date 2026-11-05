@@ -3,24 +3,26 @@ on:
   push:
     branches: [rmv-worker]
     paths: [".github/workflows/rmv-probe.yml"]
-  workflow_dispatch:
 jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Abfragen
+      - name: Live-Seite im Browser testen
         run: |
-          W=https://rmv-proxy.nico-regente-projekte.workers.dev
-          O="Origin: https://nicor977.github.io"
-          g() { curl -sS -m 30 -H "$O" "$W/$1"; }
-          ZEIT=$(TZ=Europe/Berlin date +%H:%M); DATUM=$(TZ=Europe/Berlin date +%Y-%m-%d)
-          echo "===== location"; g "location.name?input=Hattersheim%20Bahnhof&maxNo=3" | jq -c '.stopLocationOrCoordLocation[].StopLocation | {id,extId,name,lat,lon}'
-          echo "===== trip (Koordinaten)"
-          g "trip?originCoordLat=50.0697&originCoordLong=8.4878&destCoordLat=50.1069&destCoordLong=8.6633&date=$DATUM&time=$ZEIT&numF=3" > t.json
-          jq -c 'keys' t.json; jq -c '{scrB,scrF}' t.json
-          jq -c '.Trip[0] | del(.LegList) | del(.ServiceDays) | del(.TariffResult) | del(.Freq)' t.json | head -c 3000; echo
-          jq -c '.Trip[] | [.duration, ([.LegList.Leg[] | {type, name, cat: .Product[0].catOut, line: .Product[0].line, o: .Origin.name, ot: .Origin.time, ort: .Origin.rtTime, otr: .Origin.track, ortr: .Origin.rtTrack, d: .Destination.name, dt: .Destination.time, drt: .Destination.rtTime, canc: .cancelled, msgs: ([.Messages.Message[]? | .head] )}])]' t.json | head -c 6000; echo
-          echo "===== Leg-Keys"; jq -c '[.Trip[].LegList.Leg[] | keys] | add | unique' t.json
-          echo "===== Message-Beispiel"; jq -c '[.. | objects | select(has("Message")) | .Message[]?] | .[0:3]' t.json | head -c 4000; echo
-          echo "===== Notes-Beispiel"; jq -c '[.Trip[].LegList.Leg[].Notes?.Note[]?] | unique_by(.value) | .[0:8]' t.json | head -c 3000; echo
-          echo "===== himsearch"; g "himsearch?lines=S1&maxNo=3" > h.json; jq -c 'keys' h.json; jq -c '.Message[0:3][]? | {id, head, lead, text: (.text|.[0:300]), sDate, eDate, category, priority, act}' h.json | head -c 4000; echo
+          sleep 60
+          npm i --silent playwright@1.48.2 >/dev/null && npx playwright install --with-deps chromium >/dev/null 2>&1
+          cat > t.js <<'JS'
+          const { chromium } = require('playwright');
+          (async () => {
+            const b = await chromium.launch(); const p = await b.newPage();
+            p.on('console', m => console.log('console:', m.text()));
+            let st; p.on('response', r => { if (r.url().includes('workers.dev')) st = r.status(); });
+            await p.goto('https://nicor977.github.io/Verbindungen/?v=' + Date.now());
+            await p.waitForSelector('.trip', { timeout: 60000 }); await p.waitForTimeout(3000);
+            console.log('Worker-Status:', st);
+            console.log('Meldungen:', await p.$$eval('#meldungen summary', d => d.map(x => x.textContent)));
+            console.log('Warnungen:', await p.$$eval('.trip', d => d.map(x => x.querySelector('.chips').textContent + ' | ' + [...x.querySelectorAll('.warn')].map(w => w.textContent).join(' / '))));
+            await b.close();
+          })();
+          JS
+          node t.js
