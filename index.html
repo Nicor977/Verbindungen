@@ -86,7 +86,14 @@ button, input { font: inherit; color: inherit; }
 .trip.d-ok { border-left-color: var(--ok); }
 .trip.d-mid { border-left-color: #e6a100; }
 .trip.d-bad { border-left-color: var(--late); }
-.trip.past { opacity: .7; }
+.pastlist { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-top: 8px; overflow: hidden; opacity: .85; }
+.prow { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 10px; border-left: 5px solid var(--line); font-size: 14px; }
+.prow + .prow { border-top: 1px solid var(--line); }
+.prow.d-ok { border-left-color: var(--ok); } .prow.d-mid { border-left-color: #e6a100; } .prow.d-bad { border-left-color: var(--late); }
+.prow .pt { font-variant-numeric: tabular-nums; font-weight: 600; white-space: nowrap; }
+.prow .pt .delay { font-size: 12px; }
+.prow .pl { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
+.chip.sm { font-size: 11px; padding: 1px 5px; }
 .past-h { color: var(--muted); font-size: 13px; margin: 14px 2px -4px; display: flex; justify-content: space-between; }
 .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
@@ -514,9 +521,21 @@ function renderPast(pastPlan, plan) {
     .filter((it) => new Date(firstRide(it).startTime).getTime() < now && !current.has(sig(it)))
     .slice(-3);
   box.innerHTML = past.length
-    ? `<div class="past-h"><span>Schon abgefahren</span><span>so pünktlich lief es</span></div>` + past.map((it) => tripHtml(it, true)).join("") +
+    ? `<div class="past-h"><span>Schon abgefahren</span><span>so pünktlich lief es</span></div>` + `<div class="pastlist">${past.map(pastRowHtml).join("")}</div>` +
       `<div class="legend"><span><i style="background:var(--ok)"></i>pünktlich</span><span><i style="background:#e6a100"></i>2–5 min</span><span><i style="background:var(--late)"></i>über 5 min</span><span><i style="background:var(--line)"></i>keine Echtzeit</span></div><div class="past-h"><span>Nächste Verbindungen</span></div>`
     : "";
+}
+
+// Kompakte Zeile für bereits abgefahrene Verbindungen
+function pastRowHtml(it) {
+  const rides = it.legs.filter((l) => l.mode !== "WALK");
+  const f = rides[0] || it.legs[0], l = rides[rides.length - 1] || it.legs[it.legs.length - 1];
+  const lines = rides.map((r) => {
+    const bg = r.routeColor ? `#${r.routeColor}` : "var(--muted)", fg = r.routeTextColor ? `#${r.routeTextColor}` : "#fff";
+    return `<span class="chip sm" style="background:${esc(bg)};color:${esc(fg)}">${esc(r.displayName || r.routeShortName || r.mode)}</span>`;
+  }).join("");
+  return `<div class="prow ${delayClass(it)}"><span class="pt">${hm(f.startTime)}${delayHtml(f.startTime, f.scheduledStartTime, f.realTime)}
+    → ${hm(l.endTime)}${delayHtml(l.endTime, l.scheduledEndTime, l.realTime)}</span><span class="pl">${lines}</span></div>`;
 }
 
 function tripHtml(it, isPast) {
