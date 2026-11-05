@@ -13,6 +13,9 @@ Im Feld „Umst.“ legst du fest, wie viele Minuten ein Umstieg mindestens daue
 ## Deutschlandticket
 „Nur Deutschlandticket“ (standardmäßig an) blendet Fernverkehr (ICE/IC/EC) und Fernbusse aus. Sonderfälle, in denen einzelne IC-Abschnitte mit dem Deutschlandticket erlaubt sind, werden nicht berücksichtigt.
 
+## RMV-Meldungen
+Die App holt zusätzlich die offiziellen RMV-Störungsmeldungen (z. B. „Busse statt Bahnen“) für die gesuchte Strecke. Weil die RMV-API keine Abfragen direkt aus dem Browser erlaubt und der Schlüssel geheim bleiben muss, läuft das über einen kleinen Cloudflare Worker (`worker/worker.js`). Der Schlüssel liegt dort als Secret `RMV_KEY`, nie im Code. Der Worker nimmt nur Anfragen von dieser Seite und nur für Lese-Dienste an. Fällt RMV aus, funktioniert die App trotzdem, nur ohne Meldungen.
+
 ## Hosting mit GitHub Pages
 Settings → Pages → Source: „Deploy from a branch“, Branch `main`, Ordner `/ (root)`.
 

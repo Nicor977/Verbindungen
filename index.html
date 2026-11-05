@@ -53,6 +53,10 @@ button, input { font: inherit; color: inherit; }
 .sel { flex: 1; min-width: 0; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font: inherit; color: inherit; }
 .row .check { width: auto; flex: 1; display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 14px; }
 .check input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.meldungen { background: var(--warn-bg); color: var(--warn-text); border-radius: 12px; padding: 8px 12px; margin-top: 4px; font-size: 14px; }
+.meldungen .mh { font-weight: 650; margin-bottom: 4px; }
+.meldungen .msg summary { cursor: pointer; padding: 4px 0; }
+.meldungen .mt { white-space: pre-line; padding: 4px 0 8px; color: var(--text); }
 .iconbtn {
   flex: none; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--line);
   background: var(--bg); cursor: pointer; font-size: 18px; line-height: 1;
@@ -158,6 +162,7 @@ footer a { color: inherit; }
   </div>
 
   <div class="status" id="status"></div>
+  <div id="meldungen" class="meldungen" hidden></div>
   <div id="results"></div>
   <button class="secondary more" id="later" hidden>Spätere Verbindungen</button>
 
@@ -204,6 +209,56 @@ function dur(sec) {
   return m < 60 ? `${m} min` : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")} h`;
 }
 // Verkehrsmittel, die mit dem Deutschlandticket fahren dürfen (ohne Fernverkehr und Fernbus)
+// RMV-Störungsmeldungen über den eigenen Cloudflare Worker (der RMV-Schlüssel liegt nur dort)
+const RMV_PROXY = "https://rmv-proxy.nico-regente-projekte.workers.dev";
+const normLine = (s) => String(s || "").toUpperCase().replace(/^BUS\s+/, "").replace(/\s+/g, "");
+function berlinParts(d) {
+  const f = new Intl.DateTimeFormat("sv-SE", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false });
+  const [date, time] = f.format(d).split(" ");
+  return { date, time };
+}
+async function rmvMessages(plan, when, arriveBy) {
+  if (plan.from?.lat == null || plan.to?.lat == null) return null;
+  const { date, time } = berlinParts(when);
+  const q = new URLSearchParams({ originCoordLat: plan.from.lat, originCoordLong: plan.from.lon,
+    destCoordLat: plan.to.lat, destCoordLong: plan.to.lon, date, time, numF: 6 });
+  if (arriveBy) q.set("searchForArrival", "1");
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch(`${RMV_PROXY}/trip?${q}`, { signal: ctrl.signal });
+    if (!res.ok) throw new Error(`RMV ${res.status}`);
+    const j = await res.json();
+    const all = new Map(), byLine = new Map();
+    for (const trip of j.Trip || []) for (const leg of trip.LegList?.Leg || []) {
+      const prod = (leg.Product || [])[0] || {};
+      const line = normLine(prod.line || prod.name || leg.name);
+      for (const m of leg.Messages?.Message || []) {
+        if (m.act === false || !m.head) continue;
+        all.set(m.id, m);
+        if (line) { if (!byLine.has(line)) byLine.set(line, new Set()); byLine.get(line).add(m.id); }
+      }
+    }
+    return { all, byLine };
+  } finally { clearTimeout(t); }
+}
+function htmlToText(html) {
+  const doc = new DOMParser().parseFromString(String(html || "").replace(/<br\s*\/?>/gi, "\n").replace(/<li>/gi, "\n• ").replace(/<\/(ul|ol|p|div)>/gi, "\n"), "text/html");
+  doc.querySelectorAll("script, style").forEach((e) => e.remove());
+  return doc.body.textContent.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+function rmvForLeg(l) {
+  if (!state.rmv || l.mode === "WALK") return [];
+  const ids = state.rmv.byLine.get(normLine(l.routeShortName || l.displayName)) || [];
+  return [...ids].map((id) => state.rmv.all.get(id)).filter(Boolean);
+}
+function renderMeldungen() {
+  const box = $("meldungen");
+  const msgs = state.rmv ? [...state.rmv.all.values()] : [];
+  box.hidden = !msgs.length;
+  box.innerHTML = msgs.length ? `<div class="mh">RMV-Meldungen für diese Strecke</div>` + msgs.map((m) =>
+    `<details class="msg"><summary>${esc(m.head)}</summary><div class="mt">${esc(htmlToText(m.text || m.lead))}</div></details>`).join("") : "";
+}
+
 const DTICKET_MODES = "TRAM,SUBWAY,FERRY,METRO,BUS,REGIONAL_FAST_RAIL,REGIONAL_RAIL,SUBURBAN,FUNICULAR,AERIAL_LIFT,OTHER";
 const BUS_MODES = new Set(["BUS", "COACH"]);
 const RAIL_NAME = /^(S|RB|RE|IC|ICE|EC|U)\d*/;
@@ -371,6 +426,11 @@ async function search(cursor) {
   if (!cursor) { $("results").innerHTML = ""; $("later").hidden = true; }
   try {
     const plan = await api("/v5/plan", params);
+    if (!cursor) {
+      const when = params.time ? new Date(params.time) : new Date();
+      state.rmv = await rmvMessages(plan, when, state.mode === "arr").catch(() => null);
+      renderMeldungen();
+    }
     const its = plan.itineraries || [];
     state.nextCursor = plan.nextPageCursor || null;
     $("results").insertAdjacentHTML("beforeend", its.map(tripHtml).join(""));
@@ -398,7 +458,9 @@ function tripHtml(it) {
 
   const warnings = [];
   if (cancelled) warnings.push("Teil der Verbindung fällt aus.");
-  if (rides.some((l) => BUS_MODES.has(l.mode) && RAIL_NAME.test(l.routeShortName || "")))
+  const rmv = [...new Map(rides.flatMap(rmvForLeg).map((m) => [m.id, m])).values()];
+  if (rmv.length) rmv.slice(0, 2).forEach((m) => warnings.push("RMV: " + m.head));
+  else if (rides.some((l) => BUS_MODES.has(l.mode) && RAIL_NAME.test(l.routeShortName || "")))
     warnings.push("Bus statt Bahn (Ersatzverkehr).");
   const alerts = [...new Set(it.legs.flatMap((l) => (l.alerts || []).map((a) => a.headerText || a.descriptionText)).filter(Boolean))];
   alerts.slice(0, 2).forEach((a) => warnings.push(a));
