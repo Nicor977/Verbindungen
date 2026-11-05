@@ -1,0 +1,21 @@
+name: RMV-Worker prüfen
+on:
+  push:
+    branches: [rmv-worker]
+    paths: [".github/workflows/rmv-probe.yml"]
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Abfragen
+        run: |
+          W=https://rmv-proxy.nico-regente-projekte.workers.dev
+          O="Origin: https://nicor977.github.io"
+          q() { echo "===== $1"; curl -sS -m 30 -H "$O" -D - "$W/$1" | head -c ${2:-6000}; echo; }
+          q "location.name?input=Hattersheim" 3000
+          q "location.name?input=Frankfurt%20Hauptbahnhof" 3000
+          ZEIT=$(TZ=Europe/Berlin date +%H:%M); DATUM=$(TZ=Europe/Berlin date +%Y-%m-%d)
+          q "trip?originExtId=3011036&destExtId=3000010&date=$DATUM&time=$ZEIT&numF=2" 20000
+          q "himsearch?lines=S1" 8000
+          echo "===== fremde Herkunft (soll 403 sein)"; curl -sS -o /dev/null -w "%{http_code}\n" -H "Origin: https://evil.example" "$W/trip"
