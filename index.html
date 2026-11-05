@@ -82,7 +82,14 @@ button, input { font: inherit; color: inherit; }
 }
 .secondary { padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); cursor: pointer; }
 .status { color: var(--muted); font-size: 14px; margin: 14px 2px 6px; min-height: 20px; }
-.trip { background: var(--card); border: 1px solid var(--line); border-radius: 14px; margin-top: 10px; overflow: hidden; }
+.trip { background: var(--card); border: 1px solid var(--line); border-left: 6px solid var(--line); border-radius: 14px; margin-top: 10px; overflow: hidden; }
+.trip.d-ok { border-left-color: var(--ok); }
+.trip.d-mid { border-left-color: #e6a100; }
+.trip.d-bad { border-left-color: var(--late); }
+.trip.past { opacity: .7; }
+.past-h { color: var(--muted); font-size: 13px; margin: 14px 2px -4px; display: flex; justify-content: space-between; }
+.legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .trip.cancelled { opacity: .55; }
 .trip summary { list-style: none; padding: 12px; cursor: pointer; }
 .trip summary::-webkit-details-marker { display: none; }
@@ -163,6 +170,7 @@ footer a { color: inherit; }
 
   <div class="status" id="status"></div>
   <div id="meldungen" class="meldungen" hidden></div>
+  <div id="past"></div>
   <div id="results"></div>
   <button class="secondary more" id="later" hidden>Spätere Verbindungen</button>
 
@@ -217,8 +225,8 @@ function berlinParts(d) {
   const [date, time] = f.format(d).split(" ");
   return { date, time };
 }
-async function rmvMessages(plan, when, arriveBy) {
-  if (plan.from?.lat == null || plan.to?.lat == null) return null;
+// Fragt RMV für mehrere Startzeiten ab und sammelt Meldungen und Echtzeit (Verspätung je Linie + Plan-Abfahrt/Ankunft)
+async function rmvTrip(plan, when, arriveBy) {
   const { date, time } = berlinParts(when);
   const q = new URLSearchParams({ originCoordLat: plan.from.lat, originCoordLong: plan.from.lon,
     destCoordLat: plan.to.lat, destCoordLong: plan.to.lon, date, time, numF: 6 });
@@ -227,9 +235,20 @@ async function rmvMessages(plan, when, arriveBy) {
   try {
     const res = await fetch(`${RMV_PROXY}/trip?${q}`, { signal: ctrl.signal });
     if (!res.ok) throw new Error(`RMV ${res.status}`);
-    const j = await res.json();
-    const all = new Map(), byLine = new Map();
-    for (const trip of j.Trip || []) for (const leg of trip.LegList?.Leg || []) {
+    return await res.json();
+  } finally { clearTimeout(t); }
+}
+const hhmmDiff = (d1, t1, d2, t2) => Math.round((new Date(`${d2}T${t2}Z`) - new Date(`${d1}T${t1}Z`)) / 60000);
+async function rmvMessages(plan, whens, arriveBy) {
+  if (plan.from?.lat == null || plan.to?.lat == null) return null;
+  const results = await Promise.allSettled(whens.map((w) => rmvTrip(plan, w, arriveBy)));
+  const all = new Map(), byLine = new Map(), rt = new Map();
+  let ok = false;
+  for (const r of results) {
+    if (r.status !== "fulfilled") continue;
+    ok = true;
+    for (const trip of r.value.Trip || []) for (const leg of trip.LegList?.Leg || []) {
+      if (leg.type !== "JNY") continue;
       const prod = (leg.Product || [])[0] || {};
       const line = normLine(prod.line || prod.name || leg.name);
       for (const m of leg.Messages?.Message || []) {
@@ -237,9 +256,40 @@ async function rmvMessages(plan, when, arriveBy) {
         all.set(m.id, m);
         if (line) { if (!byLine.has(line)) byLine.set(line, new Set()); byLine.get(line).add(m.id); }
       }
+      const o = leg.Origin || {}, d = leg.Destination || {};
+      if (line && o.rtTime) rt.set(`${line}|dep|${o.date} ${o.time.slice(0, 5)}`, hhmmDiff(o.date, o.time, o.rtDate || o.date, o.rtTime));
+      if (line && d.rtTime) rt.set(`${line}|arr|${d.date} ${d.time.slice(0, 5)}`, hhmmDiff(d.date, d.time, d.rtDate || d.date, d.rtTime));
     }
-    return { all, byLine };
-  } finally { clearTimeout(t); }
+  }
+  return ok ? { all, byLine, rt } : null;
+}
+// Ergänzt Echtzeit von RMV, wo Transitous keine hat (z. B. Ersatzbusse)
+function applyRmvRealtime(it) {
+  if (!state.rmv) return it;
+  for (const l of it.legs) {
+    if (l.mode === "WALK" || l.realTime) continue;
+    const line = normLine(l.routeShortName || l.displayName);
+    const key = (kind, iso) => { const p = berlinParts(new Date(iso)); return `${line}|${kind}|${p.date} ${p.time}`; };
+    const dDep = state.rmv.rt.get(key("dep", l.scheduledStartTime || l.startTime));
+    const dArr = state.rmv.rt.get(key("arr", l.scheduledEndTime || l.endTime));
+    if (dDep == null && dArr == null) continue;
+    l.realTime = true; l.rtSource = "RMV";
+    if (dDep != null) l.startTime = new Date(new Date(l.scheduledStartTime || l.startTime).getTime() + dDep * 60000).toISOString();
+    if (dArr != null) l.endTime = new Date(new Date(l.scheduledEndTime || l.endTime).getTime() + dArr * 60000).toISOString();
+  }
+  return it;
+}
+// Farbe nach größter Verspätung (Abfahrt erste Fahrt, Ankunft letzte Fahrt)
+function delayClass(it) {
+  const rides = it.legs.filter((l) => l.mode !== "WALK");
+  if (!rides.length) return "";
+  const f = rides[0], l = rides[rides.length - 1];
+  const ds = [];
+  if (f.realTime && f.scheduledStartTime) ds.push(minutes(f.startTime, f.scheduledStartTime));
+  if (l.realTime && l.scheduledEndTime) ds.push(minutes(l.endTime, l.scheduledEndTime));
+  if (!ds.length) return "d-unknown";
+  const m = Math.max(...ds);
+  return m <= 1 ? "d-ok" : m <= 5 ? "d-mid" : "d-bad";
 }
 function htmlToText(html) {
   const doc = new DOMParser().parseFromString(String(html || "").replace(/<br\s*\/?>/gi, "\n").replace(/<li>/gi, "\n• ").replace(/<\/(ul|ol|p|div)>/gi, "\n"), "text/html");
@@ -425,15 +475,23 @@ async function search(cursor) {
   $("status").textContent = "Suche läuft …";
   if (!cursor) { $("results").innerHTML = ""; $("later").hidden = true; }
   try {
-    const plan = await api("/v5/plan", params);
+    // Bei „Jetzt“ zusätzlich die letzten 45 Minuten abfragen, um bereits abgefahrene Verbindungen zu zeigen
+    const showPast = !cursor && state.mode === "now";
+    const pastStart = new Date(Date.now() - 45 * 60000);
+    const [plan, pastPlan] = await Promise.all([
+      api("/v5/plan", params),
+      showPast ? api("/v5/plan", { ...params, time: pastStart.toISOString() }).catch(() => null) : null,
+    ]);
     if (!cursor) {
       const when = params.time ? new Date(params.time) : new Date();
-      state.rmv = await rmvMessages(plan, when, state.mode === "arr").catch(() => null);
+      const whens = showPast ? [pastStart, when] : [when];
+      state.rmv = await rmvMessages(plan, whens, state.mode === "arr").catch(() => null);
       renderMeldungen();
+      renderPast(showPast ? pastPlan : null, plan);
     }
-    const its = plan.itineraries || [];
+    const its = (plan.itineraries || []).map(applyRmvRealtime);
     state.nextCursor = plan.nextPageCursor || null;
-    $("results").insertAdjacentHTML("beforeend", its.map(tripHtml).join(""));
+    $("results").insertAdjacentHTML("beforeend", its.map((it) => tripHtml(it)).join(""));
     $("later").hidden = !state.nextCursor || !its.length;
     const stand = hm(new Date().toISOString());
     $("status").textContent = its.length || cursor
@@ -445,7 +503,23 @@ async function search(cursor) {
   }
 }
 
-function tripHtml(it) {
+function firstRide(it) { return it.legs.find((l) => l.mode !== "WALK") || it.legs[0]; }
+function renderPast(pastPlan, plan) {
+  const box = $("past");
+  if (!pastPlan) { box.innerHTML = ""; return; }
+  const now = Date.now();
+  const sig = (it) => { const f = firstRide(it); return `${f.routeShortName || f.displayName}|${f.scheduledStartTime || f.startTime}`; };
+  const current = new Set((plan.itineraries || []).map(sig));
+  const past = (pastPlan.itineraries || []).map(applyRmvRealtime)
+    .filter((it) => new Date(firstRide(it).startTime).getTime() < now && !current.has(sig(it)))
+    .slice(-3);
+  box.innerHTML = past.length
+    ? `<div class="past-h"><span>Schon abgefahren</span><span>so pünktlich lief es</span></div>` + past.map((it) => tripHtml(it, true)).join("") +
+      `<div class="legend"><span><i style="background:var(--ok)"></i>pünktlich</span><span><i style="background:#e6a100"></i>2–5 min</span><span><i style="background:var(--late)"></i>über 5 min</span><span><i style="background:var(--line)"></i>keine Echtzeit</span></div><div class="past-h"><span>Nächste Verbindungen</span></div>`
+    : "";
+}
+
+function tripHtml(it, isPast) {
   const rides = it.legs.filter((l) => l.mode !== "WALK");
   const first = rides[0] || it.legs[0], last = rides[rides.length - 1] || it.legs[it.legs.length - 1];
   const cancelled = it.legs.some((l) => l.cancelled);
@@ -465,7 +539,7 @@ function tripHtml(it) {
   const alerts = [...new Set(it.legs.flatMap((l) => (l.alerts || []).map((a) => a.headerText || a.descriptionText)).filter(Boolean))];
   alerts.slice(0, 2).forEach((a) => warnings.push(a));
 
-  return `<details class="trip${cancelled ? " cancelled" : ""}"><summary>
+  return `<details class="trip ${delayClass(it)}${isPast ? " past" : ""}${cancelled ? " cancelled" : ""}"><summary>
     <div class="top">
       <div class="times">${hm(first.startTime)}${delayHtml(first.startTime, first.scheduledStartTime, first.realTime)}
         – ${hm(last.endTime)}${delayHtml(last.endTime, last.scheduledEndTime, last.realTime)}</div>
