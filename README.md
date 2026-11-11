@@ -21,6 +21,7 @@ Die App holt zusätzlich die offiziellen RMV-Störungsmeldungen (z. B. „Busse 
 - Jede Verbindung hat links einen Farbbalken: grün = pünktlich (bis 1 min), gelb = 2–5 min, rot = über 5 min, grau = keine Echtzeit.
 - Wo Transitous keine Echtzeit hat (z. B. Ersatzbusse), ergänzt die App die Verspätung von RMV.
 - „Direkt ab …“ listet alle direkten Fahrten der nächsten Stunde vom Start zum Ziel. Der Routenplaner lässt Fahrten weg, die früher abfahren, aber nicht früher ankommen (z. B. 834 neben X17); diese sind mit „neu“ markiert.
+- „Alle Abfahrten ab …“ (zugeklappt) zeigt alle Abfahrten an der Starthaltestelle für 15–60 Minuten, höchstens 50. Fahrten zum Ziel sind grün hinterlegt.
 
 ## Hosting mit GitHub Pages
 Settings → Pages → Source: „Deploy from a branch“, Branch `main`, Ordner `/ (root)`.
