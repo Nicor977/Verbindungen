@@ -103,6 +103,14 @@ button, input { font: inherit; color: inherit; }
 .prow .pn { flex: 1; color: var(--muted); font-size: 12px; text-align: right; }
 .prow.cancelled { opacity: .55; text-decoration: line-through; }
 .prow .extra { color: var(--accent); font-weight: 650; }
+.alldeps { margin-top: 14px; }
+.alldeps > summary { color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; padding: 2px; }
+.alldeps > summary::-webkit-details-marker { display: none; }
+.alldeps > summary::before { content: "▸ "; } .alldeps[open] > summary::before { content: "▾ "; }
+.alldeps .ad-opt { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 13px; margin: 6px 2px 0; }
+.alldeps .ad-opt select { padding: 4px 6px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+.prow .hs { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.prow.todest { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .trip summary { list-style: none; padding: 10px 12px; cursor: pointer; }
 .trip { margin-top: 6px; border-radius: 10px; }
 .crow { display: flex; align-items: center; gap: 8px; }
@@ -194,6 +202,7 @@ footer a { color: inherit; }
   <div class="status" id="status"></div>
   <div id="meldungen" class="meldungen" hidden></div>
   <div id="direct"></div>
+  <div id="alldeps"></div>
   <div id="past"></div>
   <div id="results"></div>
   <button class="secondary more" id="later" hidden>Spätere Verbindungen</button>
@@ -497,7 +506,7 @@ async function search(cursor) {
     if (state.mode === "arr") params.arriveBy = "true";
   }
   $("status").textContent = "Suche läuft …";
-  if (!cursor) { $("results").innerHTML = ""; $("direct").innerHTML = ""; $("later").hidden = true; }
+  if (!cursor) { $("results").innerHTML = ""; $("direct").innerHTML = ""; $("alldeps").innerHTML = ""; $("later").hidden = true; }
   try {
     // Bei „Jetzt“ zusätzlich die letzten 45 Minuten abfragen, um bereits abgefahrene Verbindungen zu zeigen
     const showPast = !cursor && state.mode === "now";
@@ -513,7 +522,7 @@ async function search(cursor) {
       renderMeldungen();
       renderPast(showPast ? pastPlan : null, plan);
       if (state.mode !== "arr") renderDirect(params.time ? new Date(params.time) : new Date(), plan);
-      else $("direct").innerHTML = "";
+      else { $("direct").innerHTML = ""; $("alldeps").innerHTML = ""; }
     }
     const its = (plan.itineraries || []).map(applyRmvRealtime);
     state.nextCursor = plan.nextPageCursor || null;
@@ -554,12 +563,16 @@ async function renderDirect(when, plan) {
   let dep, arr;
   try {
     [dep, arr] = await Promise.all([
-      api("/v5/stoptimes", { stopId: state.from.id, time: when.toISOString(), n: 40, language: "de" }),
+      departures(state.from.id, when, 60),
       api("/v5/stoptimes", { stopId: state.to.id, time: new Date(when.getTime() + 150 * 60000).toISOString(), n: 200, arriveBy: "true", language: "de" }),
     ]);
   } catch { if (state.directKey === key) box.innerHTML = ""; return; }
   if (state.directKey !== key) return; // inzwischen neue Suche
   const arrivals = new Map((arr.stopTimes || []).map((s) => [s.tripId, s]));
+  state.deps = { when, list: dep.stopTimes, toDest: new Set(dep.stopTimes.filter((s) => {
+    const a = arrivals.get(s.tripId); return a && a.place.arrival && s.place.departure && new Date(a.place.arrival) > new Date(s.place.departure);
+  }).map((s) => s.tripId)) };
+  renderAllDeps();
   const limit = when.getTime() + 60 * 60000;
   const shown = new Set((plan.itineraries || []).map((it) => {
     const f = firstRide(it); return `${f.routeShortName || f.displayName}|${new Date(f.scheduledStartTime || f.startTime).getTime()}`;
@@ -579,6 +592,42 @@ async function renderDirect(when, plan) {
     `<div class="pastlist" style="opacity:1">${rows.map(directRowHtml).join("")}</div>` +
     (rows.some((r) => r.extra) ? `<div class="legend"><span><b class="extra" style="color:var(--accent)">neu</b> = fehlt in den Vorschlägen, weil nicht schneller</span></div>` : "");
 }
+// Abfahrten der nächsten `mins` Minuten; große Bahnhöfe brauchen mehrere Seiten (höchstens 4 Anfragen)
+async function departures(stopId, when, mins) {
+  const limit = when.getTime() + mins * 60000, list = [];
+  let cursor = null;
+  for (let page = 0; page < 4; page++) {
+    const res = await api("/v5/stoptimes", cursor ? { stopId, n: 100, pageCursor: cursor, language: "de" } : { stopId, time: when.toISOString(), n: 100, language: "de" });
+    const sts = (res.stopTimes || []).filter((s) => s.place.departure);
+    list.push(...sts);
+    cursor = res.nextPageCursor;
+    if (!cursor || !sts.length || new Date(sts[sts.length - 1].place.departure).getTime() > limit) break;
+  }
+  const seen = new Set();
+  return { stopTimes: list.filter((s) => new Date(s.place.departure).getTime() <= limit && !seen.has(s.tripId) && seen.add(s.tripId)) };
+}
+
+// Alle Abfahrten an der Starthaltestelle, zugeklappt; Zeitraum wählbar und auf dem Gerät gemerkt
+function renderAllDeps() {
+  const box = $("alldeps"), d = state.deps;
+  if (!d || !d.list.length) { box.innerHTML = ""; return; }
+  const mins = Number(load("depMins", 30));
+  const limit = d.when.getTime() + mins * 60000;
+  const all = d.list.filter((s) => new Date(s.place.departure).getTime() <= limit);
+  const list = all.slice(0, 50); // höchstens 50 Abfahrten zeigen
+  const opts = [15, 30, 45, 60].map((m) => `<option value="${m}"${m === mins ? " selected" : ""}>${m} min</option>`).join("");
+  box.innerHTML = `<details class="alldeps"${state.depsOpen ? " open" : ""}><summary>Alle Abfahrten ab ${esc(state.from.name)} (${all.length > list.length ? `erste ${list.length} von ${all.length}` : list.length} in ${mins} min)</summary>
+    <div class="ad-opt">Zeitraum <select id="depmins">${opts}</select><span>· grün hinterlegt = fährt zum Ziel</span></div>
+    ${list.length ? `<div class="pastlist" style="opacity:1">${list.map((s) => depRowHtml(s, d.toDest.has(s.tripId))).join("")}</div>` : ""}</details>`;
+}
+function depRowHtml(s, toDest) {
+  const p = s.place;
+  const bg = s.routeColor ? `#${s.routeColor}` : "var(--muted)", fg = s.routeTextColor ? `#${s.routeTextColor}` : "#fff";
+  return `<div class="prow${toDest ? " todest" : ""}${p.cancelled || s.cancelled ? " cancelled" : ""}"><span class="pt">${hm(p.departure)}${delayHtml(p.departure, p.scheduledDeparture, s.realTime)}</span>
+    <span class="pl"><span class="chip sm" style="background:${esc(bg)};color:${esc(fg)}">${esc(s.displayName || s.routeShortName || s.mode)}</span></span>
+    <span class="hs">${esc(s.headsign || "")}</span><span class="pn" style="flex:0">${trackHtml(p, s.mode)}</span></div>`;
+}
+
 function directRowHtml({ s, a, extra }) {
   const d = s.place, z = a.place;
   const bg = s.routeColor ? `#${s.routeColor}` : "var(--muted)", fg = s.routeTextColor ? `#${s.routeTextColor}` : "#fff";
@@ -683,6 +732,8 @@ $("results").addEventListener("toggle", (e) => {
   const d = e.target; if (!d.dataset || !d.dataset.key) return;
   d.open ? state.openTrips.add(d.dataset.key) : state.openTrips.delete(d.dataset.key);
 }, true);
+$("alldeps").addEventListener("toggle", (e) => { if (e.target.classList.contains("alldeps")) state.depsOpen = e.target.open; }, true);
+$("alldeps").addEventListener("change", (e) => { if (e.target.id === "depmins") { save("depMins", Number(e.target.value)); renderAllDeps(); } });
 $("meldungen").addEventListener("toggle", (e) => { if (e.target.id === "mbox") state.msgsOpen = e.target.open; }, true);
 
 // ---------- Start ----------
