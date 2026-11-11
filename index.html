@@ -100,6 +100,9 @@ button, input { font: inherit; color: inherit; }
 .legend { display: flex; gap: 12px; color: var(--muted); font-size: 12px; margin: 6px 2px 0; flex-wrap: wrap; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
 .trip.cancelled { opacity: .55; }
+.prow .pn { flex: 1; color: var(--muted); font-size: 12px; text-align: right; }
+.prow.cancelled { opacity: .55; text-decoration: line-through; }
+.prow .extra { color: var(--accent); font-weight: 650; }
 .trip summary { list-style: none; padding: 10px 12px; cursor: pointer; }
 .trip { margin-top: 6px; border-radius: 10px; }
 .crow { display: flex; align-items: center; gap: 8px; }
@@ -190,6 +193,7 @@ footer a { color: inherit; }
 
   <div class="status" id="status"></div>
   <div id="meldungen" class="meldungen" hidden></div>
+  <div id="direct"></div>
   <div id="past"></div>
   <div id="results"></div>
   <button class="secondary more" id="later" hidden>Spätere Verbindungen</button>
@@ -493,7 +497,7 @@ async function search(cursor) {
     if (state.mode === "arr") params.arriveBy = "true";
   }
   $("status").textContent = "Suche läuft …";
-  if (!cursor) { $("results").innerHTML = ""; $("later").hidden = true; }
+  if (!cursor) { $("results").innerHTML = ""; $("direct").innerHTML = ""; $("later").hidden = true; }
   try {
     // Bei „Jetzt“ zusätzlich die letzten 45 Minuten abfragen, um bereits abgefahrene Verbindungen zu zeigen
     const showPast = !cursor && state.mode === "now";
@@ -508,6 +512,8 @@ async function search(cursor) {
       state.rmv = await rmvMessages(plan, whens, state.mode === "arr").catch(() => null);
       renderMeldungen();
       renderPast(showPast ? pastPlan : null, plan);
+      if (state.mode !== "arr") renderDirect(params.time ? new Date(params.time) : new Date(), plan);
+      else $("direct").innerHTML = "";
     }
     const its = (plan.itineraries || []).map(applyRmvRealtime);
     state.nextCursor = plan.nextPageCursor || null;
@@ -537,6 +543,50 @@ function renderPast(pastPlan, plan) {
     ? `<div class="past-h"><span>Schon abgefahren</span><span>so pünktlich lief es</span></div>` + `<div class="pastlist">${past.map(pastRowHtml).join("")}</div>` +
       `<div class="legend"><span><i style="background:var(--ok)"></i>pünktlich</span><span><i style="background:#e6a100"></i>2–5 min</span><span><i style="background:var(--late)"></i>über 5 min</span><span><i style="background:var(--line)"></i>keine Echtzeit</span></div><div class="past-h"><span>Nächste Verbindungen</span></div>`
     : "";
+}
+
+// Direkte Abfahrten an der Starthaltestelle. Der Routenplaner lässt Fahrten weg, die früher
+// abfahren, aber nicht früher ankommen (z. B. 834 16:29 → 16:44 neben X17 16:34 → 16:44).
+// Deshalb: Abfahrten am Start und Ankünfte am Ziel holen und über die Fahrt (tripId) abgleichen.
+async function renderDirect(when, plan) {
+  const box = $("direct"), key = `${state.from.id}|${state.to.id}|${when.getTime()}`;
+  state.directKey = key;
+  let dep, arr;
+  try {
+    [dep, arr] = await Promise.all([
+      api("/v5/stoptimes", { stopId: state.from.id, time: when.toISOString(), n: 40, language: "de" }),
+      api("/v5/stoptimes", { stopId: state.to.id, time: new Date(when.getTime() + 150 * 60000).toISOString(), n: 200, arriveBy: "true", language: "de" }),
+    ]);
+  } catch { if (state.directKey === key) box.innerHTML = ""; return; }
+  if (state.directKey !== key) return; // inzwischen neue Suche
+  const arrivals = new Map((arr.stopTimes || []).map((s) => [s.tripId, s]));
+  const limit = when.getTime() + 60 * 60000;
+  const shown = new Set((plan.itineraries || []).map((it) => {
+    const f = firstRide(it); return `${f.routeShortName || f.displayName}|${new Date(f.scheduledStartTime || f.startTime).getTime()}`;
+  }));
+  const rows = [];
+  for (const s of dep.stopTimes || []) {
+    const a = arrivals.get(s.tripId), d = s.place;
+    if (!a || !a.place.arrival || !d.departure) continue;
+    const t = new Date(d.departure).getTime();
+    if (t > limit || new Date(a.place.arrival) <= new Date(d.departure)) continue;
+    if (rows.some((r) => r.s.tripId === s.tripId)) continue;
+    rows.push({ s, a, extra: !shown.has(`${s.routeShortName || s.displayName}|${new Date(d.scheduledDeparture || d.departure).getTime()}`) });
+    if (rows.length >= 6) break;
+  }
+  if (!rows.length) { box.innerHTML = ""; return; }
+  box.innerHTML = `<div class="past-h"><span>Direkt ab ${esc(state.from.name)}</span><span>nächste Stunde</span></div>` +
+    `<div class="pastlist" style="opacity:1">${rows.map(directRowHtml).join("")}</div>` +
+    (rows.some((r) => r.extra) ? `<div class="legend"><span><b class="extra" style="color:var(--accent)">neu</b> = fehlt in den Vorschlägen, weil nicht schneller</span></div>` : "");
+}
+function directRowHtml({ s, a, extra }) {
+  const d = s.place, z = a.place;
+  const bg = s.routeColor ? `#${s.routeColor}` : "var(--muted)", fg = s.routeTextColor ? `#${s.routeTextColor}` : "#fff";
+  const cancelled = d.cancelled || z.cancelled || s.cancelled;
+  return `<div class="prow${cancelled ? " cancelled" : ""}"><span class="pt">${hm(d.departure)}${delayHtml(d.departure, d.scheduledDeparture, s.realTime)}
+    → ${hm(z.arrival)}${delayHtml(z.arrival, z.scheduledArrival, s.realTime)}</span>
+    <span class="pn">${extra ? '<span class="extra">neu</span> · ' : ""}${minutes(z.arrival, d.departure)} min${trackHtml(d, s.mode)}</span>
+    <span class="pl"><span class="chip sm" style="background:${esc(bg)};color:${esc(fg)}">${esc(s.displayName || s.routeShortName || s.mode)}</span></span></div>`;
 }
 
 // Kompakte Zeile für bereits abgefahrene Verbindungen
