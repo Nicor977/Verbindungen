@@ -16,6 +16,19 @@ const ERLAUBTE_HERKUNFT = [
   "http://localhost:8765", // lokales Testen
 ];
 
+// Anfragegrenze je IP-Adresse und Minute. Die Herkunftsprüfung lässt sich außerhalb des Browsers
+// umgehen; die Grenze schützt das RMV-Kontingent. Der Zähler liegt nur im Arbeitsspeicher des Workers
+// (je Cloudflare-Standort, nach Neustart leer), ist also ein einfacher Schutz und keine harte Sperre.
+const MAX_PRO_MINUTE = 40; // die App braucht etwa 2 Anfragen je Suche
+const zaehler = new Map();
+function zuVieleAnfragen(ip) {
+  const minute = Math.floor(Date.now() / 60000);
+  if (zaehler.size > 5000) zaehler.clear();
+  const e = zaehler.get(ip);
+  if (!e || e.minute !== minute) { zaehler.set(ip, { minute, n: 1 }); return false; }
+  return ++e.n > MAX_PRO_MINUTE;
+}
+
 function cors(origin) {
   return {
     "Access-Control-Allow-Origin": origin,
@@ -35,6 +48,8 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: erlaubt ? 204 : 403, headers: kopf });
     if (request.method !== "GET") return new Response("Nur GET erlaubt", { status: 405, headers: kopf });
     if (!erlaubt) return new Response("Herkunft nicht erlaubt", { status: 403 });
+    if (zuVieleAnfragen(request.headers.get("CF-Connecting-IP") || "?"))
+      return new Response("Zu viele Anfragen, bitte kurz warten", { status: 429, headers: { ...kopf, "Retry-After": "60" } });
     if (!env.RMV_KEY) return new Response("RMV_KEY fehlt", { status: 500, headers: kopf });
 
     const url = new URL(request.url);
