@@ -363,8 +363,25 @@ function trackHtml(p, mode) {
 async function api(path, params) {
   const url = `${API}${path}?${new URLSearchParams(params)}`;
   const res = await fetch(url);
-  if (!res.ok) throw new Error(`Server antwortet mit ${res.status}`);
+  if (!res.ok) { const err = new Error(`Server antwortet mit ${res.status}`); err.status = res.status; throw err; }
   return res.json();
+}
+// Haltestellen-IDs enthalten den Namen des Datensatzes bei Transitous. Wird der umbenannt, kennt der
+// Server die gespeicherte ID nicht mehr. Dann die Haltestelle über ihren Namen neu suchen und die
+// neue ID auch in den Favoriten merken. Liefert true, wenn sich die ID geändert hat.
+async function refreshPlace(place) {
+  if (!place || /^-?[\d.]+,-?[\d.]+$/.test(place.id)) return false; // Koordinaten veralten nicht
+  try {
+    const stops = (await api("/v1/geocode", { text: place.name, language: "de" })).filter((h) => h.type === "STOP");
+    const hit = stops.find((h) => h.name === place.name) || stops[0];
+    if (!hit || hit.id === place.id) return false;
+    const old = place.id;
+    place.id = hit.id;
+    for (const f of favs) for (const k of ["from", "to"]) if (f[k].id === old) f[k].id = hit.id;
+    for (const st of stations) if (st.id === old) st.id = hit.id;
+    save("favs", favs); save("stations", stations);
+    return true;
+  } catch { return false; }
 }
 
 // ---------- Favoriten ----------
@@ -496,6 +513,8 @@ $("later").addEventListener("click", () => search(state.nextCursor));
 async function search(cursor) {
   if (!state.from || !state.to) { $("status").textContent = "Bitte Start und Ziel aus der Liste wählen."; return; }
   clearTimeout(state.refreshTimer);
+  // Laufnummer: startet inzwischen eine neuere Suche, wird die Antwort dieser Suche verworfen
+  const my = state.searchSeq = (state.searchSeq || 0) + 1;
   const params = { fromPlace: state.from.id, toPlace: state.to.id, numItineraries: 5, language: "de" };
   const minT = $("mintransfer").value;
   if (minT) params.minTransferTime = minT;
@@ -511,18 +530,32 @@ async function search(cursor) {
     // Bei „Jetzt“ zusätzlich die letzten 45 Minuten abfragen, um bereits abgefahrene Verbindungen zu zeigen
     const showPast = !cursor && state.mode === "now";
     const pastStart = new Date(Date.now() - 45 * 60000);
-    const [plan, pastPlan] = await Promise.all([
+    const fetchPlans = () => Promise.all([
       api("/v5/plan", params),
       showPast ? api("/v5/plan", { ...params, time: pastStart.toISOString() }).catch(() => null) : null,
     ]);
+    let plan, pastPlan;
+    try { [plan, pastPlan] = await fetchPlans(); }
+    catch (err) {
+      // Unbekannte Haltestelle (4xx): IDs über den Namen erneuern und einmal neu versuchen
+      if (cursor || !(err.status >= 400 && err.status < 500) || err.status === 429) throw err;
+      const changed = (await Promise.all([refreshPlace(state.from), refreshPlace(state.to)])).some(Boolean);
+      if (my !== state.searchSeq) return;
+      if (!changed) throw err;
+      params.fromPlace = state.from.id; params.toPlace = state.to.id;
+      [plan, pastPlan] = await fetchPlans();
+    }
+    if (my !== state.searchSeq) return;
     if (!cursor) {
       const when = params.time ? new Date(params.time) : new Date();
       const whens = showPast ? [pastStart, when] : [when];
-      state.rmv = await rmvMessages(plan, whens, state.mode === "arr").catch(() => null);
+      const rmv = await rmvMessages(plan, whens, state.mode === "arr").catch(() => null);
+      if (my !== state.searchSeq) return;
+      state.rmv = rmv;
       renderMeldungen();
       renderPast(showPast ? pastPlan : null, plan);
       if (state.mode !== "arr") renderDirect(params.time ? new Date(params.time) : new Date(), plan);
-      else { $("direct").innerHTML = ""; $("alldeps").innerHTML = ""; }
+      else { state.directKey = null; $("direct").innerHTML = ""; $("alldeps").innerHTML = ""; }
     }
     const its = (plan.itineraries || []).map(applyRmvRealtime);
     state.nextCursor = plan.nextPageCursor || null;
@@ -534,6 +567,7 @@ async function search(cursor) {
       : "Keine Verbindungen gefunden.";
     if (state.mode === "now" && !cursor) state.refreshTimer = setTimeout(() => search(), 60000);
   } catch (err) {
+    if (my !== state.searchSeq) return;
     $("status").textContent = `Fehler: ${err.message}. Internetverbindung prüfen und nochmal versuchen.`;
   }
 }

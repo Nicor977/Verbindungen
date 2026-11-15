@@ -45,7 +45,7 @@ Kein eigener Server, keine Datenbank. Hosting: GitHub Pages (`main`, Root).
 | GitHub Pages | Hosting `https://nicor977.github.io/Verbindungen/` | Repo-Einstellungen |
 
 ## Kritische Bereiche (beim Review besonders genau prüfen)
-- `worker/worker.js`: Schlüssel-Schutz (`RMV_KEY` nur als Secret, `accessId` aus der Anfrage wird verworfen), Whitelist `ERLAUBTE_DIENSTE` und `ERLAUBTE_HERKUNFT`. Jede Lockerung kann den Schlüssel für Dritte nutzbar machen.
+- `worker/worker.js`: Schlüssel-Schutz (`RMV_KEY` nur als Secret, `accessId` aus der Anfrage wird verworfen), Whitelist `ERLAUBTE_DIENSTE` und `ERLAUBTE_HERKUNFT`. Dazu die Anfragegrenze `MAX_PRO_MINUTE` je IP (nur im Arbeitsspeicher). Jede Lockerung kann den Schlüssel für Dritte nutzbar machen.
 - `index.html`, alle `innerHTML`-Stellen (13): Texte aus Transitous/RMV müssen durch `esc()` bzw. `htmlToText()` laufen (XSS).
 - `index.html`, Zeit- und Zeitzonenlogik (`berlinParts`, `hm`, `minutes`, `TZ`): Fehler wirken sich auf alle angezeigten Zeiten aus, besonders um Mitternacht und bei Zeitumstellung.
 - `index.html`, Zuordnung RMV ↔ Transitous (`rmvForLeg`, `applyRmvRealtime`, `tripKey`): falsche Zuordnung zeigt falsche Verspätungen oder Meldungen.

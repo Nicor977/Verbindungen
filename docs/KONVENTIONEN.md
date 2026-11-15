@@ -33,3 +33,4 @@ Stand: 2026-11-15
 - Deutsche Bezeichner und Kommentare.
 - Transitous wird direkt aus dem Browser abgefragt; ein eigener User-Agent lässt sich dort nicht setzen.
 - „Nur Deutschlandticket“ berücksichtigt keine IC-Sonderfreigaben (steht so im README).
+- „Direkt ab“ fragt nur 200 Ankünfte am Ziel ab (rückwärts ab Start+150 min). Das ist nur ein Fallback; an großen Zielbahnhöfen darf der Kasten leer bleiben.
