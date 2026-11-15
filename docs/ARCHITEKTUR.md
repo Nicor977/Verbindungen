@@ -53,5 +53,5 @@ Kein eigener Server, keine Datenbank. Hosting: GitHub Pages (`main`, Root).
 
 ## Offene Fragen
 - Es gibt keine Versions-Tags und kein Changelog; die einzige Versionsmarke ist der Cache-Name `verbindungen-v2` in `sw.js`.
-- Branches `rmv-worker` und `rmv-probe` liegen noch auf GitHub; ob sie vollständig in `main` aufgegangen sind, ist (unverifiziert).
+- Branches `rmv-worker` und `rmv-probe` liegen noch auf GitHub. `worker/worker.js` ist seit Commit `576531c` in `main`; ob die Branches darüber hinaus etwas enthalten, ist (unverifiziert).
 - Wie der Worker deployt wird (Dashboard oder Wrangler), ist im Repo nicht beschrieben (unverifiziert).
